@@ -132,6 +132,22 @@ if "project_data" in st.session_state:
     # --- TAB 1: COMPONENTS & PIN CONNECTION TABLE ---
     with tab1:
         st.write("### Active Component Bill of Materials (BOM)")
+        # 3D Microcontroller Model Viewer
+        st.write("### 🧊 3D Microcontroller Inspection")
+        model_html = """
+        <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+        <model-viewer 
+            src="https://raw.githubusercontent.com/mrdoob/three.js/master/examples/models/gltf/DamagedHelmet/glTF/DamagedHelmet.gltf" 
+            alt="3D Board Model" 
+            auto-rotate 
+            camera-controls 
+            style="width: 100%; height: 380px; background-color: #0f172a; border-radius: 10px;">
+        </model-viewer>
+        <p style="color:#94a3b8; font-size:12px; text-align:center; margin-top:6px;">
+            Left Click + Drag to rotate | Scroll to zoom
+        </p>
+        """
+        st.components.v1.html(model_html, height=420)
         
         comps = data.get("components", [])
         num_cols = min(len(comps), 3) if comps else 1

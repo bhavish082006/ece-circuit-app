@@ -1,4 +1,5 @@
 streamlit
-google-genai
-matplotlib
 numpy
+plotly
+google-generativeai
+st-spline

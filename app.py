@@ -1,384 +1,232 @@
 import streamlit as st
-import numpy as np
-import plotly.graph_objects as go
 import streamlit.components.v1 as components
 
-st.set_page_config(
-    page_title="ECE Engineering Hub",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded"
+st.set_page_config(page_title="ECE 3D Arduino Lab", page_icon="🔌", layout="wide")
+st.title("🔌 ECE 3D Arduino Circuit Lab")
+st.caption("Interactive 3D wiring workspace — select two pins to connect them.")
+
+st.info(
+    "How to use: click a pin on a component, then click a second pin. "
+    "A wire will appear and the connection list will update. Click Clear Wires to reset."
 )
 
-# -------------------- THEME --------------------
-st.markdown("""
+html = r"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-.stApp { background: #0b1020; color: #edf3ff; }
-[data-testid="stSidebar"] { background: #121a2e; }
-.hero {
-    padding: 28px; border: 1px solid #26334d; border-radius: 18px;
-    background: linear-gradient(120deg,#121a2e,#192744);
-}
-.hero h1 { color: #6ee7d8; font-size: 42px; margin-bottom: 5px; }
-.hero p { color: #aab8d1; font-size: 17px; }
-.card {
-    padding: 18px; border: 1px solid #26334d; border-radius: 14px;
-    background: #121a2e; margin-bottom: 12px;
-}
-.small { color: #9eacc7; font-size: 13px; }
+html,body { margin:0; background:#0b1020; color:#eaf1ff; font-family:Arial,sans-serif; }
+#toolbar { padding:10px 12px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; background:#121a2e; }
+button { background:#1d3557; color:white; border:1px solid #49658a; border-radius:8px; padding:8px 12px; cursor:pointer; }
+button:hover { background:#285078; }
+#status { color:#6ee7d8; font-weight:bold; }
+#layout { display:grid; grid-template-columns:minmax(0,1fr) 260px; height:560px; }
+#scene { min-width:0; height:560px; }
+#panel { background:#121a2e; border-left:1px solid #26334d; padding:12px; overflow:auto; }
+h3 { margin:5px 0 10px; color:#6ee7d8; }
+#connections { font-size:13px; line-height:1.6; }
+.hint { color:#aab8d1; font-size:12px; }
+@media(max-width:650px) { #layout { grid-template-columns:1fr; height:auto; } #scene{height:430px;} #panel{height:200px;} }
 </style>
-""", unsafe_allow_html=True)
+</head>
+<body>
+<div id="toolbar">
+  <button onclick="clearWires()">Clear Wires</button>
+  <button onclick="resetCamera()">Reset View</button>
+  <button onclick="showExample()">Load Example: Arduino GND → Battery −</button>
+  <span id="status">Select a pin to begin.</span>
+</div>
+<div id="layout">
+  <div id="scene"></div>
+  <div id="panel">
+    <h3>Connection Inspector</h3>
+    <div class="hint">Click a pin, then another pin. Select a wire in the list to inspect it.</div>
+    <hr>
+    <div id="connections">No connections yet.</div>
+    <hr>
+    <div id="detail" class="hint">Pin details will appear here.</div>
+  </div>
+</div>
 
-# -------------------- DATA --------------------
-SUBJECTS = {
-    "Analog Electronics": [
-        "Diodes and Rectifiers", "BJT and FET", "Amplifiers",
-        "Operational Amplifiers", "RC Filters", "Oscillators"
-    ],
-    "Digital Electronics": [
-        "Logic Gates", "Boolean Algebra", "Flip-Flops",
-        "Counters", "Registers", "ADC and DAC"
-    ],
-    "Communication Systems": [
-        "AM Modulation", "FM Modulation", "PM Modulation",
-        "PCM", "ASK", "FSK", "PSK"
-    ],
-    "Signals and Systems": [
-        "Signal Generation", "Convolution", "Fourier Transform",
-        "Laplace Transform", "Z-Transform", "Sampling"
-    ],
-    "Microprocessors and Embedded Systems": [
-        "8086 Microprocessor", "8051 Microcontroller",
-        "Arduino", "ESP32", "Sensor Interfacing"
-    ],
-    "Control Systems": [
-        "Transfer Functions", "Block Diagrams", "Time Response",
-        "Stability", "Root Locus", "PID Controllers"
-    ],
-    "Electromagnetic Theory": [
-        "Electric Fields", "Magnetic Fields", "Transmission Lines",
-        "Waveguides", "Antennas"
-    ],
-    "VLSI and Semiconductor Devices": [
-        "MOSFET", "CMOS Logic", "Digital IC Design",
-        "Semiconductor Fabrication"
-    ]
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+const sceneDiv = document.getElementById('scene');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b1020);
+scene.fog = new THREE.Fog(0x0b1020, 16, 35);
+const camera = new THREE.PerspectiveCamera(45, sceneDiv.clientWidth/sceneDiv.clientHeight, 0.1, 100);
+camera.position.set(8,8,11);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(sceneDiv.clientWidth, sceneDiv.clientHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+sceneDiv.appendChild(renderer.domElement);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff,0x334466,2));
+const light = new THREE.DirectionalLight(0xffffff,2); light.position.set(5,10,7); scene.add(light);
+
+const mat = (color, metal=0.1) => new THREE.MeshStandardMaterial({color, metalness:metal, roughness:0.45});
+const green = mat(0x147d55), blue = mat(0x1769aa), black = mat(0x20242d), red = mat(0xe34b4b);
+const gold = mat(0xe7b84b,0.65), white = mat(0xeaf1ff);
+const board = new THREE.Mesh(new THREE.BoxGeometry(5.4,0.22,3.2), mat(0x16845b));
+board.position.set(0,0,0); scene.add(board);
+const boardTop = new THREE.Mesh(new THREE.BoxGeometry(5.25,0.03,3.05), mat(0x1c9a6b));
+boardTop.position.y=0.13; scene.add(boardTop);
+
+// Breadboard center trench and rails
+const trench = new THREE.Mesh(new THREE.BoxGeometry(5.2,0.04,0.16), mat(0x0b4b36));
+trench.position.set(0,0.16,0); scene.add(trench);
+for(let x=-2.45;x<=2.46;x+=0.22){
+  for(let z of [-1.25,-1.02,1.02,1.25]){
+    const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.035,0.025,10), mat(0x083b2c));
+    hole.position.set(x,0.17,z); scene.add(hole);
+  }
 }
 
-EXPERIMENTS = {
-    "RC Low-Pass Filter": {
-        "subject": "Analog Electronics",
-        "theory": "An RC low-pass filter passes low-frequency signals and attenuates high-frequency signals.",
-        "formula": "fc = 1 / (2πRC)",
-        "components": ["Resistor", "Capacitor", "AC signal source", "Ground"],
-        "connections": [
-            "Input source → Resistor → Output node",
-            "Output node → Capacitor → Ground",
-            "Source ground → Circuit ground"
-        ],
-        "python": """import numpy as np
-import matplotlib.pyplot as plt
-
-R = 1000       # Resistance in ohms
-C = 100e-9     # Capacitance in farads
-
-f = np.logspace(1, 6, 500)
-fc = 1 / (2 * np.pi * R * C)
-gain = 1 / np.sqrt(1 + (f / fc)**2)
-
-plt.semilogx(f, 20 * np.log10(gain))
-plt.xlabel("Frequency (Hz)")
-plt.ylabel("Gain (dB)")
-plt.title("RC Low-Pass Filter")
-plt.grid(True)
-plt.show()
-""",
-        "arduino": "// Basic Arduino analog input reading\nconst int inputPin = A0;\n\nvoid setup() {\n  Serial.begin(9600);\n}\n\nvoid loop() {\n  int value = analogRead(inputPin);\n  Serial.println(value);\n  delay(100);\n}\n"
-    },
-    "Logic Gates": {
-        "subject": "Digital Electronics",
-        "theory": "Logic gates perform Boolean operations on binary inputs and produce binary outputs.",
-        "formula": "AND: Y = A·B | OR: Y = A+B | XOR: Y = A⊕B",
-        "components": ["Logic gate IC", "Input switches", "LED", "Current-limiting resistor"],
-        "connections": [
-            "Connect input switches to gate inputs",
-            "Connect gate output to LED through a resistor",
-            "Connect power and ground according to the IC datasheet"
-        ],
-        "python": """from itertools import product
-
-print("A B | AND OR XOR")
-for A, B in product([0, 1], repeat=2):
-    print(A, B, "| ", A & B, " ", A | B, " ", A ^ B)
-""",
-        "arduino": """const int A = 2;
-const int B = 3;
-const int outputPin = 8;
-
-void setup() {
-  pinMode(A, INPUT);
-  pinMode(B, INPUT);
-  pinMode(outputPin, OUTPUT);
+const parts = {};
+const pins = [];
+function addPin(id,label,kind,pos,color){
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.105,16,12),mat(color,0.25));
+  mesh.position.copy(pos); mesh.userData={pinId:id,label,kind};
+  scene.add(mesh); pins.push(mesh); parts[id]=mesh;
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.14,0.018,8,20),mat(0xffffff));
+  ring.rotation.x=Math.PI/2; ring.position.copy(pos); ring.position.y+=0.015; scene.add(ring);
+  return mesh;
+}
+function box(name,size,pos,material){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(...size),material);
+  m.position.set(...pos); scene.add(m); return m;
+}
+function label(text,pos,color="#ffffff"){
+ const c=document.createElement('canvas'); c.width=256;c.height=64;
+ const ctx=c.getContext('2d'); ctx.fillStyle="rgba(5,12,25,.75)";
+ ctx.fillRect(0,0,256,64); ctx.font="bold 26px Arial"; ctx.fillStyle=color;
+ ctx.fillText(text,8,42);
+ const tex=new THREE.CanvasTexture(c);
+ const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true}));
+ sprite.position.set(...pos); sprite.scale.set(1.25,.32,1); scene.add(sprite);
 }
 
-void loop() {
-  int a = digitalRead(A);
-  int b = digitalRead(B);
-  digitalWrite(outputPin, a && b); // AND gate
+// Arduino Uno board
+box("Arduino", [3.1,.25,1.65],[-0.5,.42,0],blue);
+box("USB port",[.55,.32,.5],[-2.15,.48,.1],gold);
+box("Power jack",[.42,.3,.42],[-1.8,.48,.62],black);
+label("ARDUINO UNO",[-.5,.78,0],"#6ee7d8");
+const arduinoPins=[
+ ["GND","Arduino GND","GND",[-1.55,.65,-.72],0x222222],
+ ["5V","Arduino 5V","POWER",[-1.25,.65,-.72],0xe34b4b],
+ ["D13","Arduino D13","DIGITAL",[-.95,.65,-.72],0xe7b84b],
+ ["D12","Arduino D12","DIGITAL",[-.65,.65,-.72],0xe7b84b],
+ ["A0","Arduino A0","ANALOG",[.65,.65,.72],0x6ee7d8],
+ ["GND2","Arduino GND (2)","GND",[.95,.65,.72],0x222222]
+];
+arduinoPins.forEach(p=>addPin(p[0],p[1],p[2],new THREE.Vector3(...p[3]),p[4]));
+
+// Battery
+box("Battery",[1.35,.55,.85],[3.05,.42,-.1],black);
+box("Battery top",[1.25,.08,.75],[3.05,.72,-.1],mat(0x333b48));
+label("BATTERY", [3.05,1.2,-.1]);
+addPin("BAT+","Battery positive (+)","POWER",new THREE.Vector3(2.72,.9,-.45),0xe34b4b);
+addPin("BAT-","Battery negative (−)","GROUND",new THREE.Vector3(3.38,.9,-.45),0x222222);
+
+// LED and resistor
+const ledBody=new THREE.Mesh(new THREE.SphereGeometry(.22,20,16),red);
+ledBody.scale.set(1,1.25,1); ledBody.position.set(1.5,.55,1.25); scene.add(ledBody);
+label("LED",[1.5,1.05,1.25]);
+addPin("LED_A","LED anode","LED",new THREE.Vector3(1.25,.45,1.25),0xe34b4b);
+addPin("LED_K","LED cathode","LED",new THREE.Vector3(1.75,.45,1.25),0x222222);
+box("Resistor",[.7,.14,.2],[.25,.45,1.25],gold);
+label("220 Ω",[.25,.85,1.25]);
+addPin("R1_A","Resistor pin 1","RESISTOR",new THREE.Vector3(-.1,.45,1.25),0xe7b84b);
+addPin("R1_B","Resistor pin 2","RESISTOR",new THREE.Vector3(.6,.45,1.25),0xe7b84b);
+
+const wireGroup=new THREE.Group(); scene.add(wireGroup);
+let wires=[], selectedPin=null;
+const raycaster=new THREE.Raycaster(), mouse=new THREE.Vector2();
+function wireBetween(a,b,color=0x6ee7d8){
+ const start=parts[a].position.clone(), end=parts[b].position.clone();
+ const mid1=start.clone().add(new THREE.Vector3(0,.45,0));
+ const mid2=end.clone().add(new THREE.Vector3(0,.45,0));
+ const curve=new THREE.CatmullRomCurve3([start,mid1,mid2,end]);
+ const mesh=new THREE.Mesh(new THREE.TubeGeometry(curve,24,.035,8,false),mat(color,.15));
+ wireGroup.add(mesh); return mesh;
 }
+function renderConnections(){
+ const el=document.getElementById("connections");
+ if(!wires.length){el.innerHTML="No connections yet.";return;}
+ el.innerHTML=wires.map((w,i)=>`<div style="margin:7px 0;padding:7px;background:#1b2942;border-radius:7px">
+ <button onclick="inspectWire(${i})">Wire ${i+1}</button><br>${w.aLabel} ↔ ${w.bLabel}</div>`).join("");
+}
+window.inspectWire=function(i){
+ const w=wires[i];
+ document.getElementById("detail").innerHTML=`<b>${w.aLabel}</b> connected to <b>${w.bLabel}</b><br>
+ Pin types: ${w.aKind} ↔ ${w.bKind}<br>
+ <span style="color:#f4c66a">Connection is recorded visually. Electrical behavior is not yet simulated.</span>`;
+};
+function addConnection(a,b){
+ if(a===b){document.getElementById("status").textContent="Choose two different pins.";return;}
+ if(wires.some(w=>(w.a===a&&w.b===b)||(w.a===b&&w.b===a))){
+  document.getElementById("status").textContent="Those pins are already connected.";return;
+ }
+ const pa=parts[a].userData, pb=parts[b].userData;
+ const colors=(pa.kind==="GND"||pa.kind==="GROUND"||pb.kind==="GND"||pb.kind==="GROUND")?0x222222:0x6ee7d8;
+ wireBetween(a,b,colors);
+ wires.push({a,b,aLabel:pa.label,bLabel:pb.label,aKind:pa.kind,bKind:pb.kind});
+ renderConnections(); inspectWire(wires.length-1);
+ document.getElementById("status").textContent="Connected: "+pa.label+" ↔ "+pb.label;
+}
+function onClick(event){
+ const rect=renderer.domElement.getBoundingClientRect();
+ mouse.x=((event.clientX-rect.left)/rect.width)*2-1;
+ mouse.y=-((event.clientY-rect.top)/rect.height)*2+1;
+ raycaster.setFromCamera(mouse,camera);
+ const hits=raycaster.intersectObjects(pins);
+ if(!hits.length)return;
+ const p=hits[0].object.userData;
+ if(!selectedPin){
+  selectedPin=p.pinId;
+  document.getElementById("status").textContent="Selected "+p.label+". Now select destination pin.";
+  document.getElementById("detail").innerHTML=`Selected pin: <b>${p.label}</b><br>Type: ${p.kind}`;
+  hits[0].object.material=mat(0xffffff);
+ } else {
+  addConnection(selectedPin,p.pinId);
+  selectedPin=null;
+  pins.forEach(pin=>pin.material=mat(pin.userData.kind==="GND"||pin.userData.kind==="GROUND"?0x222222:
+      pin.userData.kind==="POWER"?0xe34b4b:
+      pin.userData.kind==="DIGITAL"||pin.userData.kind==="RESISTOR"?0xe7b84b:
+      pin.userData.kind==="LED"?0xe34b4b:0x6ee7d8,0.25));
+ }
+}
+renderer.domElement.addEventListener("click",onClick);
+window.clearWires=function(){while(wireGroup.children.length){wireGroup.remove(wireGroup.children[0]);}
+ wires=[];selectedPin=null;renderConnections();document.getElementById("detail").textContent="Connection list cleared.";
+ document.getElementById("status").textContent="Select a pin to begin.";};
+window.resetCamera=function(){camera.position.set(8,8,11);controls.target.set(0,0,0);controls.update();};
+window.showExample=function(){clearWires();addConnection("GND","BAT-");};
+function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera);}
+animate();
+window.addEventListener("resize",()=>{
+ const w=sceneDiv.clientWidth,h=sceneDiv.clientHeight;
+ camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h);
+});
+</script>
+</body>
+</html>
 """
-    },
-    "Arduino Sensor Lab": {
-        "subject": "Microprocessors and Embedded Systems",
-        "theory": "Arduino reads sensor voltage using its ADC and can transmit readings to a computer over USB serial.",
-        "formula": "Voltage ≈ ADC count × Vref / (2^N − 1)",
-        "components": ["Arduino Uno", "Analog sensor", "Breadboard", "Jumper wires", "USB cable"],
-        "connections": [
-            "Sensor VCC → Arduino supply (check sensor specifications)",
-            "Sensor GND → Arduino GND",
-            "Sensor signal → Arduino A0"
-        ],
-        "python": """import serial
-import time
 
-# Change COM3 to your Arduino port.
-# Linux example: /dev/ttyACM0
-arduino = serial.Serial("COM3", 9600, timeout=1)
-time.sleep(2)
+components.html(html, height=680, scrolling=True)
 
-while True:
-    line = arduino.readline().decode(errors="ignore").strip()
-    if line:
-        print("Sensor reading:", line)
-""",
-        "arduino": """const int sensorPin = A0;
-
-void setup() {
-  Serial.begin(9600);
-}
-
-void loop() {
-  int reading = analogRead(sensorPin);
-  Serial.println(reading);
-  delay(250);
-}
-"""
-    },
-    "AM Modulation": {
-        "subject": "Communication Systems",
-        "theory": "Amplitude modulation varies the carrier amplitude according to the message signal.",
-        "formula": "s(t) = Ac[1 + μ cos(2πfmt)] cos(2πfct)",
-        "components": ["Message signal", "Carrier signal", "Modulator", "Oscilloscope"],
-        "connections": [
-            "Apply message signal to the modulator input",
-            "Apply carrier signal to the carrier input",
-            "Observe the modulated output using an oscilloscope"
-        ],
-        "python": """import numpy as np
-import matplotlib.pyplot as plt
-
-fs = 100000
-t = np.arange(0, 0.005, 1/fs)
-fm, fc, mu = 1000, 10000, 0.7
-message = np.cos(2*np.pi*fm*t)
-carrier = np.cos(2*np.pi*fc*t)
-am = (1 + mu*message) * carrier
-
-plt.plot(t, am)
-plt.xlabel("Time (s)")
-plt.ylabel("Amplitude")
-plt.title("AM Modulated Signal")
-plt.grid(True)
-plt.show()
-""",
-        "arduino": "// AM signal generation requires suitable external hardware.\n// Do not connect RF circuits directly to Arduino pins."
-    }
-}
-
-# -------------------- SIDEBAR --------------------
-st.sidebar.markdown("# ⚡ ECE Hub")
-st.sidebar.caption("Virtual + Physical Engineering Laboratory")
-page = st.sidebar.radio(
-    "Navigate",
-    ["Dashboard", "ECE Subjects", "Experiment Lab", "Circuit Builder",
-     "Graph Lab", "Arduino Lab", "Coding Lab"]
+st.markdown("### What this prototype does")
+st.write(
+    "- Displays a 3D Arduino, battery, LED, resistor, and breadboard.\n"
+    "- Click any pin, then another pin to draw a wire.\n"
+    "- Lists the selected connection and pin types.\n"
+    "- Includes a one-click example for Arduino GND → battery negative."
 )
-st.sidebar.markdown("---")
-st.sidebar.info("Learning platform for ECE students")
-
-# -------------------- DASHBOARD --------------------
-if page == "Dashboard":
-    st.markdown("""
-    <div class="hero">
-      <h1>ECE Engineering Hub</h1>
-      <p>Learn. Build. Simulate. Connect real hardware.</p>
-      <p>One platform for ECE theory, circuit connections, experiments,
-      coding, graphs, and Arduino projects.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.subheader("Explore Engineering Labs")
-    cols = st.columns(4)
-    highlights = [
-        ("📘", "ECE Theory", "Concepts and formulas"),
-        ("🔌", "Circuit Lab", "Components and connections"),
-        ("📈", "Graph Lab", "Interactive engineering plots"),
-        ("🤖", "Arduino Lab", "Physical hardware projects")
-    ]
-    for col, item in zip(cols, highlights):
-        with col:
-            st.markdown(
-                f'<div class="card"><h2>{item[0]}</h2><b>{item[1]}</b>'
-                f'<p class="small">{item[2]}</p></div>',
-                unsafe_allow_html=True
-            )
-
-    st.subheader("Featured Experiments")
-    for name, exp in EXPERIMENTS.items():
-        with st.expander(f"🔬 {name} — {exp['subject']}"):
-            st.write(exp["theory"])
-            st.code(exp["formula"])
-
-# -------------------- SUBJECTS --------------------
-elif page == "ECE Subjects":
-    st.title("📚 ECE Subject Library")
-    st.write("Select a subject to explore its topics.")
-    subject = st.selectbox("Choose ECE subject", list(SUBJECTS.keys()))
-    st.subheader(subject)
-    for topic in SUBJECTS[subject]:
-        st.markdown(f"- {topic}")
-    st.info("You can expand this library by adding notes, diagrams, experiments, and quizzes for each topic.")
-
-# -------------------- EXPERIMENT LAB --------------------
-elif page == "Experiment Lab":
-    st.title("🔬 Experiment Laboratory")
-    selected = st.selectbox("Select experiment", list(EXPERIMENTS.keys()))
-    exp = EXPERIMENTS[selected]
-
-    st.subheader("1. Theory")
-    st.write(exp["theory"])
-
-    st.subheader("2. Formula / Principle")
-    st.code(exp["formula"])
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("3. Required Components")
-        for component in exp["components"]:
-            st.write(f"• {component}")
-    with col2:
-        st.subheader("4. Connection Details")
-        for connection in exp["connections"]:
-            st.write(f"• {connection}")
-
-    st.subheader("5. Python Code")
-    st.code(exp["python"], language="python")
-
-    st.subheader("6. Arduino Code")
-    st.code(exp["arduino"], language="cpp")
-
-    st.caption("Hardware safety: verify voltage, polarity, current limits, and datasheets before connecting components.")
-
-# -------------------- CIRCUIT BUILDER --------------------
-elif page == "Circuit Builder":
-    st.title("🔌 Circuit Builder")
-    st.write("Starter component workspace. Select components and arrange your circuit plan.")
-    component_types = ["Resistor", "Capacitor", "Inductor", "Diode", "LED",
-                       "BJT", "MOSFET", "Op-Amp", "Arduino Uno", "Ground", "AC Source"]
-    selected_components = st.multiselect("Add components to your workspace", component_types)
-    if selected_components:
-        st.subheader("Your Components")
-        cols = st.columns(4)
-        for i, component in enumerate(selected_components):
-            with cols[i % 4]:
-                st.markdown(
-                    f'<div class="card"><h3>🔧 {component}</h3>'
-                    '<p class="small">Component added to design</p></div>',
-                    unsafe_allow_html=True
-                )
-    st.warning("This is a component-planning interface. Electrical wire routing and circuit simulation require a dedicated simulator integration.")
-    st.markdown("**Next integration:** CircuitJS or ngspice for real electrical simulation.")
-
-# -------------------- GRAPH LAB --------------------
-elif page == "Graph Lab":
-    st.title("📈 Interactive Graph Lab")
-    experiment = st.selectbox("Choose graph", ["RC Low-Pass Filter", "AM Modulation", "Sine Wave"])
-    if experiment == "RC Low-Pass Filter":
-        R = st.number_input("Resistance (Ω)", min_value=1.0, value=1000.0)
-        C = st.number_input("Capacitance (F)", min_value=1e-12, value=100e-9, format="%.10f")
-        f = np.logspace(1, 7, 600)
-        fc = 1 / (2 * np.pi * R * C)
-        gain = 1 / np.sqrt(1 + (f / fc)**2)
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=f, y=20*np.log10(gain), mode="lines", name="Gain"))
-        fig.update_layout(title=f"RC Low-Pass Filter | Cutoff = {fc:.2f} Hz",
-                         xaxis_title="Frequency (Hz)", yaxis_title="Gain (dB)",
-                         xaxis_type="log", template="plotly_dark")
-        st.plotly_chart(fig, use_container_width=True)
-    elif experiment == "AM Modulation":
-        fm = st.slider("Message frequency (Hz)", 100, 2000, 500)
-        fc = st.slider("Carrier frequency (Hz)", 2000, 20000, 8000)
-        mu = st.slider("Modulation index", 0.0, 1.0, 0.7)
-        t = np.linspace(0, 0.01, 5000)
-        signal = (1 + mu*np.cos(2*np.pi*fm*t))*np.cos(2*np.pi*fc*t)
-        fig = go.Figure(go.Scatter(x=t, y=signal, mode="lines", name="AM"))
-        fig.update_layout(title="AM Waveform", xaxis_title="Time (s)",
-                         yaxis_title="Amplitude", template="plotly_dark")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        frequency = st.slider("Frequency (Hz)", 1, 100, 10)
-        t = np.linspace(0, 1, 1000)
-        y = np.sin(2*np.pi*frequency*t)
-        fig = go.Figure(go.Scatter(x=t, y=y, mode="lines"))
-        fig.update_layout(title="Sine Wave", xaxis_title="Time (s)",
-                         yaxis_title="Amplitude", template="plotly_dark")
-        st.plotly_chart(fig, use_container_width=True)
-
-# -------------------- ARDUINO LAB --------------------
-elif page == "Arduino Lab":
-    st.title("🤖 Arduino Hardware Lab")
-    st.write("Use this section to plan and document physical Arduino experiments.")
-    st.markdown("""
-    **Basic connection workflow**
-    1. Connect Arduino to your computer using USB.
-    2. Upload the Arduino sketch using Arduino IDE.
-    3. Run a Python serial program on the computer to receive measurements.
-    4. Display the incoming values as a live graph.
-    """)
-    st.warning("Streamlit Cloud runs on a remote server and usually cannot access USB devices connected to your personal computer. For direct hardware access, run the app locally or use a browser Web Serial interface.")
-    st.code("""# Install locally
-pip install pyserial
-
-# List serial ports
-python -m serial.tools.list_ports
-""", language="bash")
-    st.markdown("**Example Arduino sketch:**")
-    st.code(EXPERIMENTS["Arduino Sensor Lab"]["arduino"], language="cpp")
-    st.markdown("**Example Python receiver:**")
-    st.code(EXPERIMENTS["Arduino Sensor Lab"]["python"], language="python")
-
-# -------------------- CODING LAB --------------------
-elif page == "Coding Lab":
-    st.title("💻 ECE Coding Lab")
-    language = st.selectbox("Choose language", ["Python", "Arduino C++", "C"])
-    starter_code = {
-        "Python": "import numpy as np\\n\\n# Write your ECE program here\\n",
-        "Arduino C++": "void setup() {\\n  Serial.begin(9600);\\n}\\n\\nvoid loop() {\\n  // Write your Arduino code here\\n}\\n",
-        "C": "#include <stdio.h>\\n\\nint main() {\\n    // Write your C program here\\n    return 0;\\n}\\n"
-    }
-    user_code = st.text_area("Code editor", value=starter_code[language], height=280)
-    st.caption("This starter editor displays code. Secure code execution can be added later using a sandboxed execution service.")
-    st.download_button(
-        "Download code",
-        data=user_code,
-        file_name={"Python": "ece_program.py", "Arduino C++": "ece_sketch.ino", "C": "ece_program.c"}[language],
-        mime="text/plain"
-    )
-
-# -------------------- FOOTER --------------------
-st.markdown("---")
-st.markdown(
-    "<p style='text-align:center;color:#9eacc7'>⚡ ECE Engineering Hub | "
-    "Built with Python + Streamlit</p>",
-    unsafe_allow_html=True
+st.warning(
+    "Prototype limitation: this records visual wiring only. It does not yet solve "
+    "electrical circuits, check voltage/current, or run Arduino firmware. "
+    "Use safe low-voltage supplies and verify real wiring against datasheets."
 )
